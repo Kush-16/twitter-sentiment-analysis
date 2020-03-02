@@ -1,0 +1,461 @@
+---
+title: "Final Project - Twitter"
+author: "Kushagra Sen, DeepakRao Bandhakavi, Akhil Menon"
+date: "2/24/2020"
+output: html_document
+---
+In this project, we are analyzing the sentiments towrads the iPhone 11 Series.
+The data set has got over 20,000 tweets spread across a span of ~ first 20 days of January 2020.
+
+The process started with extracting tweets from twitter using Twitter API. The tweets are collected by filtering from frequently used hashtags like #iPhone11, #iPhone11Pro etc. and famous twitter handles such as the Apple CEO Tim Cook. 
+
+Post collection, data is cleaned to make it devoid of duplicates, punctuation flaws, numbers, URL’s etc which cleared the ground for data analysis. 
+
+
+```{r setup, include=FALSE}
+library(twitteR)
+library(rtweet)
+library(stringr)
+library(rvest)
+library(xml2)
+library(dplyr)
+library(tidyverse)
+library(tidytext)
+library(xlsx)
+library(textclean)
+library(qdapRegex)
+library(tm)
+library(SnowballC)
+library(scales)
+library(ggplot2)
+library(wordcloud)
+library(udpipe)
+library(lattice)
+library(wordcloud2)
+library(lattice)
+library(NLP)
+library(textdata)
+library(rlang)
+library(RColorBrewer)
+library(reshape2)
+library(igraph)
+library(ggraph)
+library(topicmodels)
+```
+
+```{r}
+final_tweets <- read.csv("https://drive.google.com/uc?export=download&id=1kOlxzs8Bq9WzXl8UlZDD8mOrTE9pyq6s")
+head(final_tweets,5)
+```
+
+We have date written in a format MM/DD/YYYY and we are de-limiting it so that we can evaluate the monthly and yearly trends.
+
+```{r}
+final_tweets <- final_tweets %>%
+  separate(created_at
+           , into = c("Month", "Date", "Year"), sep = "/")
+```
+
+### **Step 1:** Data Visualization
+
+**This graph shows the frequency of tweets based on the Source attribute**
+
+```{r}
+src_df <- table(final_tweets$source)
+str(src_df)
+w <- as.data.frame(table(final_tweets$source))
+w <- w[order(-w$Freq),]
+names(w) <- c("Source","Frequency")
+ggplot(data=w[0:10,], aes(x=reorder(Source,-Frequency), y=Frequency)) +
+  geom_bar(stat="identity", fill="steelblue")+
+  geom_text(aes(label=Frequency), vjust=-0.3, size=3.5)+
+  theme_minimal()+theme(axis.text.x = element_text(angle = 90, hjust = 1)) +xlab("Source")
+
+```
+
+**This graph shows the frequency of tweets based on the user location**
+
+```{r}
+w <- as.data.frame(table(final_tweets$country ))
+w <- w[order(-w$Freq),]
+names(w) <- c("Country","Frequency")
+
+ggplot(data=w[0:10,], aes(x=reorder(Country,-Frequency), y=Frequency)) +
+  geom_bar(stat="identity", fill="orange")+
+  geom_text(aes(label=Frequency), vjust=-0.3, size=3.5)+
+  theme_minimal()+theme(axis.text.x = element_text(angle = 90, hjust = 1)) +xlab("Source")
+
+```
+
+**Here we can see the Day-to-Day trend of tweets regarding iPhone 11 series**
+
+```{r}
+pie <- ggplot(final_tweets, aes(x = "", fill = factor(Date))) + 
+  geom_bar(width = 1) +
+  theme(axis.line = element_blank(), 
+        plot.title = element_text(hjust=0.5)) + 
+  labs(fill="class", 
+       x=NULL, 
+       y=NULL, 
+       title="Day to Day trend of tweets regarding iPhone 11 series", 
+       caption="Data has been pulled using Twitter API ")
+pie + coord_polar(theta = "y", start=0)
+```
+
+
+### **Step 2:** Sentiment Analysis
+
+**1. Cleaning the special characters and links from the tweets:**
+Since the data obtained from twitter is random text with a lot of irregularities and irrelevant content, data had to be made ready for further analysis. The tweets consisted of duplicate tweets, additional website/blog links, Punctuation marks, irregular font and text, repeated words.
+
+```{r}
+total_text <- rbind(final_tweets)
+total_text$text = gsub("&amp", "", total_text$text)
+total_text$text = gsub("&amp", "", total_text$text)
+total_text$text = gsub("(RT|via)((?:\\b\\W*@\\w+)+)", "", total_text$text)
+total_text$text = gsub("@\\w+", "", total_text$text)
+total_text$text = gsub("[[:punct:]]", "", total_text$text)
+total_text$text = gsub("[[:digit:]]", "", total_text$text)
+total_text$text = gsub("http\\w+", "", total_text$text)
+total_text$text = gsub("[ \t]{2,}", "", total_text$text)
+total_text$text = gsub("^\\s+|\\s+$", "", total_text$text)
+```
+
+Frequently occuring but common words which can be considered as stop words
+
+```{r}
+df <- total_text %>% mutate(Text = str_replace_all(text, "(<br />)+", " "))
+tokens <- df %>% unnest_tokens(output = word, input = Text)
+tokens %>%  dplyr::count(word, sort = TRUE)
+```
+
+As most of the words are stopwords, we should remove them.
+
+```{r}
+get_stopwords()
+cleaned_tokens <- tokens %>%  anti_join(get_stopwords())
+nums <- cleaned_tokens %>% filter(str_detect(word, "^[0-9]")) %>% select(word) %>% unique()
+cleaned_tokens <- cleaned_tokens %>%   anti_join(nums, by = "word")
+```
+
+After removing the stop words, we get:
+
+```{r}
+cleaned_tokens %>%  dplyr::count(word, sort = TRUE)
+```
+
+**2. Word Cloud of positive and negative words:**
+This is a word cloud showing the **positive** and **negative** words whose frequency is greater than 200 
+
+```{r}
+tokens %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort=TRUE) %>%
+  acast(word ~ sentiment, value.var="n", fill=0) %>%
+  comparison.cloud(colors=c("#F8766D", "#00BFC4"), max.words=200)
+
+sentiments <- tokens %>% 
+  inner_join(get_sentiments("nrc")) %>%
+  count(word, sentiment, sort=TRUE) 
+```
+
+
+**3. This graph shows the frequency of various sentiments gathered through these tweets**
+
+```{r}
+sentiments <- tokens %>% 
+  inner_join(get_sentiments("nrc")) %>%
+  count(word, sentiment, sort=TRUE) 
+
+ggplot(data=sentiments, aes(x=reorder(sentiment, n, sum), y=n)) + 
+  geom_bar(stat="identity", aes(fill=sentiment), show.legend=FALSE) +
+  labs(x="Sentiment", y="Frequency") +
+  theme_bw() +
+  coord_flip()
+```
+
+**4. This graph shows the Top 10 frequent terms for each sentiment**
+
+```{r}
+sentiments %>%
+  group_by(sentiment) %>%
+  arrange(desc(n)) %>%
+  slice(1:10) %>%
+  ggplot(aes(x=reorder(word, n), y=n)) +
+  geom_col(aes(fill=sentiment), show.legend=FALSE) +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  facet_wrap(~sentiment, scales="free_y") +
+  labs(y="Frequency", x="Words") +
+  coord_flip()
+```
+
+
+**5. This graph shows the frequency of words in the cleaned tokens which we obtained after removing the rare words**
+
+```{r}
+cleaned_tokens %>%   dplyr::count(word, sort = T) %>%  dplyr::rename(word_freq = n) %>%  
+  ggplot(aes(x=word_freq)) +  geom_histogram(aes(y=..count..), color="black", fill="red", alpha=0.3, bins=20) +  scale_x_continuous(breaks=c(0:5,10,100,500,10e3), trans="log1p", expand=c(0,0)) +  scale_y_continuous(breaks=c(0,100,1000,5e3,10e3,5e4,10e4,4e4), expand=c(0,0)) +  theme_bw() 
+
+```
+
+So it makes sense to remove rare words to improve the performance of text analytics.
+Let's remove words that have less than 10 appearances in our collection:
+
+```{r}
+rare <- cleaned_tokens %>%   dplyr::count(word) %>%  filter(n<10) %>%  select(word) %>% unique()
+cleaned_tokens <- cleaned_tokens %>%   anti_join(rare, by = "word")
+length(unique(cleaned_tokens$word))
+```
+
+**6. Word Cloud of frequently occuring words**
+
+```{r}
+pal <- brewer.pal(8,"Dark2")
+cleaned_tokens %>%   dplyr::count(word) %>%  with(wordcloud(word, n, random.order = FALSE, max.words =500, colors=pal))
+```
+
+
+**7. Getting Sentiments from "nrc","afinn" and "bing"**
+
+```{r}
+get_sentiments("nrc")
+get_sentiments("afinn")
+get_sentiments("bing")
+sent_reviews = cleaned_tokens %>%
+  left_join(get_sentiments("nrc")) %>%
+  rename(nrc = sentiment) %>%
+  left_join(get_sentiments("bing")) %>%
+  rename(bing = sentiment) %>%
+  left_join(get_sentiments("afinn")) %>%
+  rename(afinn = value)
+head(sent_reviews,5)
+```
+
+**8. Most common positive and negative words**
+
+```{r}
+bing_word_counts <- sent_reviews %>%  filter(!is.na(bing)) %>%  dplyr::count(word, bing, sort = TRUE)
+
+bing_word_counts %>%  filter(n > 200) %>%  mutate(n = ifelse(bing == "negative", -n, n)) %>%
+  mutate(word = reorder(word, n)) %>%  ggplot(aes(word, n, fill = bing)) +  geom_col() +  coord_flip() +  labs(y = "Contribution to sentiment")
+
+```
+
+**9. Now, tokenizing by n-gram**
+
+```{r}
+bigrams <- tokens %>%  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+bigrams %>%  dplyr::count(bigram, sort = TRUE)
+```
+
+**10. Filtering the bi-grams**
+
+```{r}
+bigrams_separated <- bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+```
+
+**New bi-gram counts:**
+```{r}
+bigrams_filtered %>% count(word1, word2, sort = TRUE)
+```
+
+**11. Visualizing the bi-grams:**
+
+```{r}
+bigram_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+bigram_counts <- bigram_united %>% 
+  dplyr::count(bigram, sort = TRUE)
+
+bigram_counts %>% arrange(desc(n))%>% head(20)%>%ggplot(aes(x=factor(bigram,levels=bigram),y=n))+geom_bar(stat="identity",fill="#003E45")+labs(title="Top 20 bigram words in Comments")+coord_flip()
+```
+
+**12. Word correlations**
+
+```{r}
+rare <- cleaned_tokens %>%
+  count(word) %>%
+  filter(n<100) %>% #remove rare words
+  # < 1000 reviews
+  select(word) %>% distinct()
+
+word_cor <- cleaned_tokens %>%
+  filter(!word %in% rare$word) %>%
+  widyr::pairwise_cor(word, Sno) %>%
+  filter(!is.na(correlation),
+         correlation > .25)
+head(word_cor,5)
+```
+
+**Visualizing word correlation:**
+```{r}
+word_cor %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = 6) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_void()
+```
+
+**13. Document Term Matrix**
+
+tf-idf is Term Frequency and Inverse document frequency. Using this, We can see the repititon of a term in a document and as compared to overall frequency of document.
+
+
+```{r}
+word_counts_by_SNo <- cleaned_tokens %>%  
+  group_by(Sno) %>%  
+  dplyr::count(word, sort = TRUE)
+word_counts_by_SNo
+
+review_dtm <- word_counts_by_SNo %>%
+  cast_dtm(Sno, word, n)
+```
+
+**14. Displaying the top tf-idf in the document**
+
+```{r}
+tfidf <- word_counts_by_SNo %>%  
+  bind_tf_idf(word, Sno, n) 
+
+top_tfidf <- tfidf %>%
+  group_by(Sno) %>%
+  arrange(desc(tf_idf)) %>%
+  top_n(3) %>% ungroup() %>%
+  arrange(Sno, -tf_idf) 
+head(top_tfidf,10)
+```
+
+**15. Now creating a 5 topic LDA model**
+
+```{r}
+lda5 <- LDA(review_dtm, k = 5, control = list(seed = 1234))
+terms(lda5, 10)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
